@@ -1,0 +1,41 @@
+from enum import Enum
+from qfluentwidgets import qconfig, QConfig, ConfigItem, OptionsConfigItem, BoolValidator, OptionsValidator, \
+    FolderValidator, RangeConfigItem, RangeValidator, EnumSerializer, FolderListValidator
+
+
+class BufSize(Enum):
+    _32 = "32 MB"
+    _64 = "64 MB"
+    _128 = "128 MB"
+    _256 = "256 MB"
+    _512 = "512 MB"
+    _1024 = "1 GB"
+
+
+class Config(QConfig):
+    AutoRun = ConfigItem("MainWindow", "AutoRun", True, BoolValidator())
+    Notify = ConfigItem("MainWindow", "Notify", False, BoolValidator())
+    IsSourceCloud = OptionsConfigItem("MainWindow", "IsSourceCloud", True, BoolValidator())
+
+    sourceFolder = ConfigItem("Folders", "SourceFolder", "", FolderValidator())
+    yuwenFolder = ConfigItem("Folders", "Yuwen", "", FolderValidator())
+    shuxueFolder = ConfigItem("Folders", "Shuxue", "", FolderValidator())
+    yingyuFolder = ConfigItem("Folders", "Yingyu", "", FolderValidator())
+    wuliFolder = ConfigItem("Folders", "Wuli", "", FolderValidator())
+    huaxueFolder = ConfigItem("Folders", "Huaxue", "", FolderValidator())
+    shengwuFolder = ConfigItem("Folders", "Shengwu", "", FolderValidator())
+    zhengzhiFolder = ConfigItem("Folders", "Zhengzhi", "", FolderValidator())
+    lishiFolder = ConfigItem("Folders", "Lishi", "", FolderValidator())
+    diliFolder = ConfigItem("Folders", "Dili", "", FolderValidator())
+    jishuFolder = ConfigItem("Folders", "Jishu", "", FolderValidator())
+    ziliaoFolder = ConfigItem("Folders", "Ziliao", "", FolderValidator())
+
+    ScanCycle = RangeConfigItem("MainWindow", "ScanCycle", 10, RangeValidator(1, 50))
+    BufSize = OptionsConfigItem("MainWindow", "BufSize", BufSize._256, OptionsValidator(BufSize), EnumSerializer(BufSize))
+    dpiScale = OptionsConfigItem("MainWindow", "DpiScale", "Auto", OptionsValidator([1, 1.25, 1.5, 1.75, 2, "Auto"]), restart=True)
+
+
+HELP_URL = ""
+VERSION = "4.8.0"
+cfg = Config()
+qconfig.load('config/config.json', cfg)
