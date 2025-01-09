@@ -2,17 +2,19 @@ import os
 import sys
 import subprocess
 import darkdetect
+import ExpressRes
+from qfluentwidgets.components.widgets.spin_box import SpinButton, SpinIcon
 from win32file import GetDiskFreeSpace
-from PySide6.QtGui import QIcon, QColor, QAction
+from PySide6.QtGui import QIcon, QColor, QAction, QPainterPath, QPainter
 from win32api import GetVolumeInformation
-from PySide6.QtCore import Qt, Slot, QPoint, QTimer, QDate
+from PySide6.QtCore import Qt, Slot, QPoint, QTimer, QDate, QRectF
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout, QLabel, QStackedWidget, QWidget, QGridLayout, \
-    QFrame, QPushButton
+    QFrame, QPushButton, QSpinBox, QLineEdit
 from qfluentwidgets import setTheme, Theme, isDarkTheme, CheckBox, PrimaryPushButton, PushButton, \
     SubtitleLabel, Pivot, TransparentToolButton, RoundMenu, AvatarWidget, BodyLabel, CaptionLabel, Action, \
     TransparentPushButton, setThemeColor, PrimarySplitPushButton, ZhDatePicker, SpinBox, MaskDialogBase, \
-    PrimaryDropDownPushButton
-from qfluentwidgets.common.style_sheet import FluentStyleSheet
+    PrimaryDropDownPushButton, MenuAnimationType, setFont
+from qfluentwidgets.common.style_sheet import FluentStyleSheet, themeColor
 from qframelesswindow import TitleBar
 from qfluentwidgets import FluentIcon as FIF
 
@@ -46,7 +48,7 @@ class FluentTitleBar(TitleBar):
         self.buttonLayout.setAlignment(Qt.AlignTop)
         self.buttonLayout.addWidget(self.closeBtn)
         self.titleLayout = QHBoxLayout()
-        self.titleLayout.setContentsMargins(0, 7, 0, 0)
+        self.titleLayout.setContentsMargins(0, 8, 0, 0)
         self.titleLayout.addWidget(self.titleLabel)
         self.titleLayout.setAlignment(Qt.AlignTop)
         self.vBoxLayout.addLayout(self.buttonLayout)
@@ -147,6 +149,171 @@ class MessageBoxBase(MaskDialogBase):
     def hideCancelButton(self):
         self.cancelButton.hide()
         self.buttonLayout.insertStretch(0, 1)
+
+
+class EditMenu(RoundMenu):
+    """ Edit menu """
+
+    def createActions(self):
+        self.cutAct = QAction(FIF.CUT.icon(), self.tr("剪切"), self, shortcut="Ctrl+X", triggered=self.parent().cut,)
+        self.copyAct = QAction(FIF.COPY.icon(), self.tr("复制"), self, shortcut="Ctrl+C", triggered=self.parent().copy,)
+        self.pasteAct = QAction(FIF.PASTE.icon(), self.tr("粘贴"), self, shortcut="Ctrl+V", triggered=self.parent().paste,)
+        self.cancelAct = QAction(FIF.CANCEL.icon(), self.tr("撤销"), self, shortcut="Ctrl+Z", triggered=self.parent().undo,)
+        self.selectAllAct = QAction(self.tr("全选"), self, shortcut="Ctrl+A", triggered=self.parent().selectAll)
+        self.action_list = [self.cutAct, self.copyAct, self.pasteAct, self.cancelAct, self.selectAllAct]
+
+    def _parentText(self):
+        raise NotImplementedError
+
+    def _parentSelectedText(self):
+        raise NotImplementedError
+
+    def exec(self, pos, ani=True, aniType=MenuAnimationType.DROP_DOWN):
+        self.clear()
+        self.createActions()
+
+        if QApplication.clipboard().mimeData().hasText():
+            if self._parentText():
+                if self._parentSelectedText():
+                    if self.parent().isReadOnly():
+                        self.addActions([self.copyAct, self.selectAllAct])
+                    else:
+                        self.addActions(self.action_list)
+                else:
+                    if self.parent().isReadOnly():
+                        self.addAction(self.selectAllAct)
+                    else:
+                        self.addActions(self.action_list[2:])
+            elif not self.parent().isReadOnly():
+                self.addAction(self.pasteAct)
+            else:
+                return
+        else:
+            if not self._parentText():
+                return
+
+            if self._parentSelectedText():
+                if self.parent().isReadOnly():
+                    self.addActions([self.copyAct, self.selectAllAct])
+                else:
+                    self.addActions(
+                        self.action_list[:2] + self.action_list[3:])
+            else:
+                if self.parent().isReadOnly():
+                    self.addAction(self.selectAllAct)
+                else:
+                    self.addActions(self.action_list[3:])
+
+        super().exec(pos, ani, aniType)
+
+
+class LineEditMenu(EditMenu):
+    """ Line edit menu """
+
+    def __init__(self, parent: QLineEdit):
+        super().__init__("", parent)
+        self.selectionStart = parent.selectionStart()
+        self.selectionLength = parent.selectionLength()
+
+    def _onItemClicked(self, item):
+        if self.selectionStart >= 0:
+            self.parent().setSelection(self.selectionStart, self.selectionLength)
+
+        super()._onItemClicked(item)
+
+    def _parentText(self):
+        return self.parent().text()
+
+    def _parentSelectedText(self):
+        return self.parent().selectedText()
+
+    def exec(self, pos, ani=True, aniType=MenuAnimationType.DROP_DOWN):
+        return super().exec(pos, ani, aniType)
+
+
+class SpinBoxBase:
+    """ Spin box ui """
+
+    def __init__(self, parent=None):
+        super().__init__(parent=parent)
+        self.hBoxLayout = QHBoxLayout(self)
+
+        self.setProperty('transparent', True)
+        FluentStyleSheet.SPIN_BOX.apply(self)
+        self.setButtonSymbols(QSpinBox.NoButtons)
+        self.setFixedHeight(33)
+        setFont(self)
+
+        self.setAttribute(Qt.WA_MacShowFocusRect, False)
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._showContextMenu)
+
+    def setReadOnly(self, isReadOnly: bool):
+        super().setReadOnly(isReadOnly)
+        self.setSymbolVisible(not isReadOnly)
+
+    def setSymbolVisible(self, isVisible: bool):
+        """ set whether the spin symbol is visible """
+        self.setProperty("symbolVisible", isVisible)
+        self.setStyle(QApplication.style())
+
+    def _showContextMenu(self, pos):
+        menu = LineEditMenu(self.lineEdit())
+        menu.exec_(self.mapToGlobal(pos))
+
+    def _drawBorderBottom(self):
+        if not self.hasFocus():
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHints(QPainter.Antialiasing)
+        painter.setPen(Qt.NoPen)
+
+        path = QPainterPath()
+        w, h = self.width(), self.height()
+        path.addRoundedRect(QRectF(0, h-10, w, 10), 5, 5)
+
+        rectPath = QPainterPath()
+        rectPath.addRect(0, h-10, w, 8)
+        path = path.subtracted(rectPath)
+
+        painter.fillPath(path, themeColor())
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        self._drawBorderBottom()
+
+
+class InlineSpinBoxBase(SpinBoxBase):
+    """ Inline spin box base """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.upButton = SpinButton(SpinIcon.UP, self)
+        self.downButton = SpinButton(SpinIcon.DOWN, self)
+
+        self.hBoxLayout.setContentsMargins(0, 4, 4, 4)
+        self.hBoxLayout.setSpacing(5)
+        self.hBoxLayout.addWidget(self.upButton, 0, Qt.AlignRight)
+        self.hBoxLayout.addWidget(self.downButton, 0, Qt.AlignRight)
+        self.hBoxLayout.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
+        self.upButton.clicked.connect(self.stepUp)
+        self.downButton.clicked.connect(self.stepDown)
+
+    def setSymbolVisible(self, isVisible: bool):
+        super().setSymbolVisible(isVisible)
+        self.upButton.setVisible(isVisible)
+        self.downButton.setVisible(isVisible)
+
+    def setAccelerated(self, on: bool):
+        super().setAccelerated(on)
+        self.upButton.setAutoRepeat(on)
+        self.downButton.setAutoRepeat(on)
+
+
+class SpinBox(InlineSpinBoxBase, QSpinBox):
+    """ Spin box """
 
 
 class LatelyCopyMessageBox(MessageBoxBase):
@@ -498,7 +665,7 @@ class MainWindow(MicaWindow):
         self.opacity = 0.98
         setThemeColor(QColor(113, 89, 249))
         self.setWindowTitle("Express")
-        self.setWindowIcon(QIcon("icon.png"))
+        self.setWindowIcon(QIcon(":/icon.png"))
         self.setWindowOpacity(self.opacity)
         self.setFixedSize(360, 145)
         self.desktop = QApplication.screens()[0].size()
@@ -568,7 +735,7 @@ class MainWindow(MicaWindow):
         self.isClicked = True
 
         menu = RoundMenu(parent=self)
-        card = ProfileCard('UsbIcon.png', self.GetDriveName() + ' (' + drive + ')', self.GetDriveSize(), menu)
+        card = ProfileCard(':/UsbIcon.png', self.GetDriveName() + ' (' + drive + ')', self.GetDriveSize(), menu)
         menu.addWidget(card, selectable=False)
         menu.addSeparator()
         SettingAction = Action(FIF.SETTING, '设置')

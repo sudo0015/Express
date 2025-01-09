@@ -1,6 +1,6 @@
 from enum import Enum
 from qfluentwidgets import qconfig, QConfig, ConfigItem, OptionsConfigItem, BoolValidator, OptionsValidator, \
-    FolderValidator, RangeConfigItem, RangeValidator, EnumSerializer, FolderListValidator
+    FolderValidator, RangeConfigItem, RangeValidator, EnumSerializer
 
 
 class BufSize(Enum):
@@ -36,6 +36,7 @@ class Config(QConfig):
 
 
 HELP_URL = ""
-VERSION = "4.8.0"
+YEAR = "2025"
+VERSION = "5.0.0"
 cfg = Config()
 qconfig.load('config/config.json', cfg)

@@ -1,16 +1,16 @@
 import sys
 import os
 import subprocess
-import webbrowser
-from pathlib import Path
+import ExpressRes
 from typing import Union
-from config import cfg, BufSize, VERSION
-from PySide6.QtCore import Qt, Signal, QStandardPaths
+from webbrowser import open as webopen
+from config import cfg, BufSize, VERSION, YEAR
+from PySide6.QtCore import Qt, Signal, QStandardPaths, QTimer, QThread
 from PySide6.QtGui import QColor, QIcon, QPainter, QTextCursor, QAction
-from PySide6.QtWidgets import QFrame, QApplication, QWidget, QHBoxLayout, QFileDialog, QLabel, QToolButton, QVBoxLayout, \
+from PySide6.QtWidgets import QFrame, QApplication, QWidget, QHBoxLayout, QFileDialog, QLabel, QVBoxLayout, \
     QPushButton, QButtonGroup, QTextBrowser, QTextEdit, QSizePolicy
 from qfluentwidgets import MSFluentWindow, NavigationItemPosition, SubtitleLabel, MessageBox, ExpandLayout, \
-    SettingCardGroup, StateToolTip, PrimaryPushSettingCard, SmoothScrollArea, RadioButton, ExpandSettingCard, \
+    SettingCardGroup, PrimaryPushSettingCard, SmoothScrollArea, RadioButton, ExpandSettingCard, \
     ComboBox, SwitchButton, IndicatorPosition, qconfig, isDarkTheme, ConfigItem, OptionsConfigItem, \
     FluentStyleSheet, HyperlinkButton, Slider, IconWidget, drawIcon, setThemeColor, ImageLabel, MessageBoxBase, \
     SmoothScrollDelegate, setFont
@@ -542,30 +542,66 @@ class CustomFolderListSettingCard(ExpandSettingCard):
         self.viewLayout.setAlignment(Qt.AlignTop)
         self.viewLayout.setContentsMargins(0, 0, 0, 0)
 
-        self.viewLayout.addWidget(FolderItem("语文: ", self.view))
-        self.viewLayout.addWidget(FolderItem("数学: ", self.view))
-        self.viewLayout.addWidget(FolderItem("英语: ", self.view))
-        self.viewLayout.addWidget(FolderItem("物理: ", self.view))
-        self.viewLayout.addWidget(FolderItem("化学: ", self.view))
-        self.viewLayout.addWidget(FolderItem("生物: ", self.view))
-        self.viewLayout.addWidget(FolderItem("政治: ", self.view))
-        self.viewLayout.addWidget(FolderItem("历史: ", self.view))
-        self.viewLayout.addWidget(FolderItem("地理: ", self.view))
-        self.viewLayout.addWidget(FolderItem("技术: ", self.view))
-        self.viewLayout.addWidget(FolderItem("资料: ", self.view))
+        self.yuwenItem = FolderItem("语文: " + cfg.yuwenFolder.value, self.view)
+        self.shuxueItem = FolderItem("数学: " + cfg.shuxueFolder.value, self.view)
+        self.yingyuItem = FolderItem("英语: " + cfg.yingyuFolder.value, self.view)
+        self.wuliItem = FolderItem("物理: " + cfg.wuliFolder.value, self.view)
+        self.huaxueItem = FolderItem("化学: " + cfg.huaxueFolder.value, self.view)
+        self.shengwuItem = FolderItem("生物: " + cfg.shengwuFolder.value, self.view)
+        self.zhengzhiItem = FolderItem("政治: " + cfg.zhengzhiFolder.value, self.view)
+        self.lishiItem = FolderItem("历史: " + cfg.lishiFolder.value, self.view)
+        self.diliItem = FolderItem("地理: " + cfg.diliFolder.value, self.view)
+        self.jishuItem = FolderItem("技术: " + cfg.jishuFolder.value, self.view)
+        self.ziliaoItem = FolderItem("资料: " + cfg.ziliaoFolder.value, self.view)
+        self.yuwenItem.changeButton.clicked.connect(lambda: self.showFolderDialog(1))
+        self.shuxueItem.changeButton.clicked.connect(lambda: self.showFolderDialog(2))
+        self.yingyuItem.changeButton.clicked.connect(lambda: self.showFolderDialog(3))
+        self.wuliItem.changeButton.clicked.connect(lambda: self.showFolderDialog(4))
+        self.huaxueItem.changeButton.clicked.connect(lambda: self.showFolderDialog(5))
+        self.shengwuItem.changeButton.clicked.connect(lambda: self.showFolderDialog(6))
+        self.zhengzhiItem.changeButton.clicked.connect(lambda: self.showFolderDialog(7))
+        self.lishiItem.changeButton.clicked.connect(lambda: self.showFolderDialog(8))
+        self.diliItem.changeButton.clicked.connect(lambda: self.showFolderDialog(9))
+        self.jishuItem.changeButton.clicked.connect(lambda: self.showFolderDialog(10))
+        self.ziliaoItem.changeButton.clicked.connect(lambda: self.showFolderDialog(11))
+
+        self.viewLayout.addWidget(self.yuwenItem)
+        self.viewLayout.addWidget(self.shuxueItem)
+        self.viewLayout.addWidget(self.yingyuItem)
+        self.viewLayout.addWidget(self.wuliItem)
+        self.viewLayout.addWidget(self.huaxueItem)
+        self.viewLayout.addWidget(self.shengwuItem)
+        self.viewLayout.addWidget(self.zhengzhiItem)
+        self.viewLayout.addWidget(self.lishiItem)
+        self.viewLayout.addWidget(self.diliItem)
+        self.viewLayout.addWidget(self.jishuItem)
+        self.viewLayout.addWidget(self.ziliaoItem)
+
         self._adjustViewSize()
 
-    def __showFolderDialog(self):
+    def showFolderDialog(self, index):
         """ show folder dialog """
         folder = QFileDialog.getExistingDirectory(self, self.tr("选择文件夹"), self._dialogDirectory)
-
-        if not folder or folder in self.folders:
+        if not folder:
             return
 
-        self.__addFolderItem(folder)
-        self.folders.append(folder)
-        qconfig.set(self.configItem, self.folders)
-        self.folderChanged.emit(self.folders)
+        # self.__addFolderItem(folder)
+        # self.folders.append(folder)
+        # qconfig.set(self.configItem, self.folders)
+        # self.folderChanged.emit(self.folders)
+
+
+class ClearCache(QThread):
+    isFinished = Signal(bool)
+    def __init__(self):
+        super(ClearCache, self).__init__()
+
+    def run(self):
+        if os.path.exists('./Log'):
+            subprocess.call("del /s /q Log", shell=True)
+        if os.path.exists('FastCopy2.ini'):
+            subprocess.call("del /q FastCopy2.ini", shell=True)
+        self.isFinished.emit(True)
 
 
 class HomeInterface(SmoothScrollArea):
@@ -609,7 +645,7 @@ class HomeInterface(SmoothScrollArea):
         self.customFolderCard = CustomFolderListSettingCard(
             self.tr("自定义"),
             self.tr("展开选项卡以设置"),
-            directory=QStandardPaths.writableLocation(QStandardPaths.MusicLocation),
+            directory=QStandardPaths.writableLocation(QStandardPaths.DownloadLocation),
             parent=self.sourceGroup)
         self.scanCycleCard = RangeSettingCard(
             cfg.ScanCycle,
@@ -692,7 +728,13 @@ class HomeInterface(SmoothScrollArea):
                     size += sum([os.path.getsize(os.path.join(root, name)) for name in files])
                 except:
                     pass
-        return str(int(size / 1024)) + ' KB'
+        kbSize = float(size / 1024)
+        if kbSize >= 1024*1024:
+            return str(kbSize/1024/1024) + ' GB'
+        elif kbSize >= 1024:
+            return str(kbSize/1024) + ' MB'
+        else:
+            return str(int(kbSize)) + ' KB'
 
     def onOptionSourceCard(self):
         if self.optionSourceCard.comboBox.text() == "云上春晖":
@@ -709,6 +751,13 @@ class HomeInterface(SmoothScrollArea):
         cfg.set(cfg.sourceFolder, folder)
         self.cloudCard.setContent(folder)
 
+    def clearFinished(self):
+        self.clearCacheThread.exit(0)
+        self.clearCard.contentLabel.setText(self.getSize())
+        self.clearCard.button.setText('已清除')
+        QTimer.singleShot(2000, lambda: self.clearCard.button.setText('清除'))
+        self.clearCard.button.setDisabled(False)
+
     def clearCache(self):
         w = MessageBox(
             '清除缓存',
@@ -717,17 +766,11 @@ class HomeInterface(SmoothScrollArea):
         w.yesButton.setText('确定')
         w.cancelButton.setText('取消')
         if w.exec():
-            self.stateTooltip = StateToolTip('清除缓存', '正在执行', self)
-            self.stateTooltip.move(self.width() - self.stateTooltip.width() - 15, 15)
-            self.stateTooltip.show()
-            if os.path.exists('./Log'):
-                subprocess.Popen("del /s /q Log", shell=True)
-            if os.path.exists('FastCopy2.ini'):
-                subprocess.Popen("del /q FastCopy2.ini", shell=True)
-            self.stateTooltip.setContent('缓存已清除')
-            self.stateTooltip.setState(True)
-            self.stateTooltip = None
-            self.clearCard.contentLabel.setText(self.getSize())
+            self.clearCard.button.setText('清除中')
+            self.clearCard.button.setDisabled(True)
+            self.clearCacheThread = ClearCache()
+            self.clearCacheThread.start()
+            self.clearCacheThread.isFinished.connect(self.clearFinished)
 
     def recoverConfig(self):
         w = MessageBox(
@@ -766,11 +809,12 @@ class DetailMessageBox(MessageBoxBase):
         self.titleLabel = SubtitleLabel('关于 Express', self)
         self.textBox = TextBrowser(self)
         self.textBox.setText(
-            f'Express\n版本 {VERSION}\nCopyright © 2025 BUG STUDIO\n\n' +
+            f'Express\n版本 {VERSION}\nCopyright © {YEAR} BUG STUDIO\n\n' +
             'FastCopy\n版本 5.7.15\nCopyright © 2004-2024 H.Shirouzu and FastCopy Lab, LLC.\n\n' +
             'MIT License\nPermission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:\n' +
             'The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.\n' +
-            'THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.\n')
+            'THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.\n'
+        )
 
         self.viewLayout.addWidget(self.titleLabel)
         self.viewLayout.addWidget(self.textBox)
@@ -784,7 +828,7 @@ class DetailMessageBox(MessageBoxBase):
         self.yesButton.clicked.connect(self.onYesButton)
 
     def onYesButton(self):
-        webbrowser.open("https://github.com/sudo0015/Express")
+        webopen("https://github.com/sudo0015/Express")
 
 
 class AboutInterface(SmoothScrollArea):
@@ -829,9 +873,9 @@ class AboutInterface(SmoothScrollArea):
 
         self.imgLabel = ImageLabel(self)
         if isDarkTheme():
-            self.imgLabel.setImage('BannerDark.png')
+            self.imgLabel.setImage(':/BannerDark.png')
         else:
-            self.imgLabel.setImage('BannerLight.png')
+            self.imgLabel.setImage(':/BannerLight.png')
         self.imgLabel.setFixedSize(401, 150)
 
         self.__initLayout()
@@ -855,7 +899,7 @@ class AboutInterface(SmoothScrollArea):
         print("111")
 
     def onFeedbackCardClicked(self):
-        webbrowser.open("https://github.com/sudo0015/Express/issues")
+        webopen("https://github.com/sudo0015/Express/issues")
 
     def onHelpCardClicked(self):
         print("111")
@@ -896,7 +940,7 @@ class Main(MSFluentWindow):
         self.homeInterface.helpCard.clicked.connect(self.onHelpBtn)
         self.resize(800, 600)
         self.setWindowTitle('Express 设置')
-        self.setWindowIcon(QIcon('icon.png'))
+        self.setWindowIcon(QIcon(':/icon.png'))
         self.titleBar.raise_()
         desktop = QApplication.screens()[0].size()
         self.move(desktop.width() // 2 - self.width() // 2, desktop.height() // 2 - self.height() // 2)

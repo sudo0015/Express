@@ -1,5 +1,6 @@
 import sys
 import darkdetect
+import ExpressRes
 from PySide6.QtCore import Qt, QEvent
 from PySide6.QtGui import QIcon, QColor
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout, QLabel, QWidget

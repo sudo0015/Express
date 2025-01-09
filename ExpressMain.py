@@ -2,17 +2,19 @@ import os
 import sys
 import subprocess
 import darkdetect
+import ExpressRes
 from config import cfg
 from ctypes import CDLL, c_int
 from winotify import Notification, audio
 from win32api import GetVolumeInformation
 from PySide6.QtGui import QIcon, QColor
-from PySide6.QtCore import Qt, QThread, Signal, QEvent, QTimer
+from PySide6.QtCore import Qt, QThread, Signal, QEvent
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout, QLabel, QWidget
 from qfluentwidgets import setTheme, Theme, BodyLabel, isDarkTheme, PushButton, SubtitleLabel, ProgressBar, \
     InfoBar, InfoBarIcon, InfoBarPosition, IndeterminateProgressBar, setThemeColor
+from qframelesswindow.titlebar import MinimizeButton, CloseButton, MaximizeButton
+from qframelesswindow.utils import startSystemMove
 from qfluentwidgets.common.style_sheet import FluentStyleSheet
-from qframelesswindow import TitleBar
 from qfluentwidgets import FluentIcon as FIF
 
 
@@ -21,7 +23,7 @@ def isWin11():
 
 
 if isWin11():
-    from qframelesswindow import AcrylicWindow as Window
+    from qframelesswindow import AcrylicWindow as Window, TitleBarButton
 else:
     from qframelesswindow import FramelessWindow as Window
 
@@ -66,14 +68,110 @@ class TaskbarProgress:
         return self._dll.end()
 
 
+class TitleBarBase(QWidget):
+    """ Title bar base class """
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.minBtn = MinimizeButton(parent=self)
+        self.closeBtn = CloseButton(parent=self)
+        self.maxBtn = MaximizeButton(parent=self)
+
+        self._isDoubleClickEnabled = True
+
+        self.resize(200, 32)
+        self.setFixedHeight(32)
+
+        self.window().installEventFilter(self)
+
+    def eventFilter(self, obj, e):
+        if obj is self.window():
+            if e.type() == QEvent.WindowStateChange:
+                self.maxBtn.setMaxState(self.window().isMaximized())
+                return False
+
+        return super().eventFilter(obj, e)
+
+    def mouseDoubleClickEvent(self, event):
+        """ Toggles the maximization state of the window """
+        if event.button() != Qt.LeftButton or not self._isDoubleClickEnabled:
+            return
+
+        self.__toggleMaxState()
+
+    def mouseMoveEvent(self, e):
+        if sys.platform != "win32" or not self.canDrag(e.pos()):
+            return
+
+        startSystemMove(self.window(), e.globalPos())
+
+    def mousePressEvent(self, e):
+        if sys.platform == "win32" or not self.canDrag(e.pos()):
+            return
+
+        startSystemMove(self.window(), e.globalPos())
+
+    def __toggleMaxState(self):
+        """ Toggles the maximization state of the window and change icon """
+        if self.window().isMaximized():
+            self.window().showNormal()
+        else:
+            self.window().showMaximized()
+
+        if sys.platform == "win32":
+            from qframelesswindow.utils.win32_utils import releaseMouseLeftButton
+            releaseMouseLeftButton(self.window().winId())
+
+    def _isDragRegion(self, pos):
+        """ Check whether the position belongs to the area where dragging is allowed """
+        width = 0
+        for button in self.findChildren(TitleBarButton):
+            if button.isVisible():
+                width += button.width()
+
+        return 0 < pos.x() < self.width() - width
+
+    def _hasButtonPressed(self):
+        """ whether any button is pressed """
+        return any(btn.isPressed() for btn in self.findChildren(TitleBarButton))
+
+    def canDrag(self, pos):
+        """ whether the position is draggable """
+        return self._isDragRegion(pos) and not self._hasButtonPressed()
+
+    def setDoubleClickEnabled(self, isEnabled):
+        """ whether to switch window maximization status when double clicked
+        Parameters
+        ----------
+        isEnabled: bool
+            whether to enable double click
+        """
+        self._isDoubleClickEnabled = isEnabled
+
+
+class TitleBar(TitleBarBase):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.hBoxLayout = QHBoxLayout(self)
+
+        # add buttons to layout
+        self.hBoxLayout.setSpacing(0)
+        self.hBoxLayout.setContentsMargins(0, 0, 0, 0)
+        self.hBoxLayout.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+        self.hBoxLayout.addStretch(1)
+        self.hBoxLayout.addWidget(self.minBtn, 0, Qt.AlignRight)
+        self.hBoxLayout.addWidget(self.maxBtn, 0, Qt.AlignRight)
+        self.hBoxLayout.addWidget(self.closeBtn, 0, Qt.AlignRight)
+
+
 class FluentTitleBar(TitleBar):
     def __init__(self, parent):
         super().__init__(parent)
         self.setFixedHeight(45)
         self.hBoxLayout.removeWidget(self.minBtn)
         self.hBoxLayout.removeWidget(self.maxBtn)
-        self.minBtn.deleteLater()
-        self.maxBtn.deleteLater()
+        self.minBtn.setVisible(False)
+        self.maxBtn.setVisible(False)
         self.hBoxLayout.removeWidget(self.closeBtn)
         self.titleLabel = QLabel(self)
         self.titleLabel.setText(self.GetDriveName() + ' (' + drive + ')' + ' - Express')
@@ -88,11 +186,10 @@ class FluentTitleBar(TitleBar):
         self.titleLayout.setContentsMargins(0, 8, 0, 0)
         self.titleLayout.addWidget(self.titleLabel)
         self.titleLayout.setAlignment(Qt.AlignTop)
-
         self.vBoxLayout.addLayout(self.buttonLayout)
         self.vBoxLayout.addStretch(1)
         self.hBoxLayout.addLayout(self.titleLayout)
-        self.hBoxLayout.addStretch(-1)
+        self.hBoxLayout.addStretch(50)
         self.hBoxLayout.addLayout(self.vBoxLayout)
         FluentStyleSheet.FLUENT_WINDOW.apply(self)
 
@@ -199,7 +296,7 @@ class MainWindow(MicaWindow):
     def __init__(self):
         super().__init__()
         setThemeColor(QColor(113, 89, 249))
-        self.setWindowIcon(QIcon("icon.png"))
+        self.setWindowIcon(QIcon(":/icon.png"))
         self.resize(500, 130)
         self.setFixedHeight(130)
         self.setWindowOpacity(0.98)
@@ -256,7 +353,7 @@ class MainWindow(MicaWindow):
             self.thread_running = False
             self.taskbarProgress.set_mode(0)
             if cfg.Notify.value:
-                toast = Notification(app_id="Express", title="同步完成", msg=self.GetDriveName() + ' (' + drive + ')', icon=os.getcwd() + "\\SyncFinished.png", duration="short")
+                toast = Notification(app_id="Express", title="同步完成", msg=self.GetDriveName() + ' (' + drive + ')', duration="short")
                 toast.set_audio(audio.Default, loop=False)
                 toast.show()
             sys.exit()
