@@ -31,12 +31,13 @@ class Config(QConfig):
     ziliaoFolder = ConfigItem("Folders", "Ziliao", "", FolderValidator())
 
     ScanCycle = RangeConfigItem("MainWindow", "ScanCycle", 10, RangeValidator(1, 50))
+    ConcurrentProcess = ConfigItem("MainWindow", "ConcurrentProcess", 3, RangeValidator(1, 5))
     BufSize = OptionsConfigItem("MainWindow", "BufSize", BufSize._256, OptionsValidator(BufSize), EnumSerializer(BufSize))
     dpiScale = OptionsConfigItem("MainWindow", "DpiScale", "Auto", OptionsValidator([1, 1.25, 1.5, 1.75, 2, "Auto"]), restart=True)
 
 
 HELP_URL = ""
 YEAR = "2025"
-VERSION = "5.0.0"
+VERSION = "5.1.6"
 cfg = Config()
 qconfig.load('config/config.json', cfg)

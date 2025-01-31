@@ -3,7 +3,6 @@ import sys
 import subprocess
 import darkdetect
 import ExpressRes
-from qfluentwidgets.components.widgets.spin_box import SpinButton, SpinIcon
 from win32file import GetDiskFreeSpace
 from PySide6.QtGui import QIcon, QColor, QAction, QPainterPath, QPainter
 from win32api import GetVolumeInformation
@@ -12,9 +11,10 @@ from PySide6.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout, QLabel, QS
     QFrame, QPushButton, QSpinBox, QLineEdit
 from qfluentwidgets import setTheme, Theme, isDarkTheme, CheckBox, PrimaryPushButton, PushButton, \
     SubtitleLabel, Pivot, TransparentToolButton, RoundMenu, AvatarWidget, BodyLabel, CaptionLabel, Action, \
-    TransparentPushButton, setThemeColor, PrimarySplitPushButton, ZhDatePicker, SpinBox, MaskDialogBase, \
+    TransparentPushButton, setThemeColor, PrimarySplitPushButton, ZhDatePicker, MaskDialogBase, \
     PrimaryDropDownPushButton, MenuAnimationType, setFont
 from qfluentwidgets.common.style_sheet import FluentStyleSheet, themeColor
+from qfluentwidgets.components.widgets.spin_box import SpinButton, SpinIcon
 from qframelesswindow import TitleBar
 from qfluentwidgets import FluentIcon as FIF
 
@@ -73,6 +73,7 @@ class MessageBoxBase(MaskDialogBase):
 
     def __init__(self, parent=None):
         super().__init__(parent=parent)
+        self.isDelete = None
         self.menu = RoundMenu(parent=self)
         self.passDeleteAction = Action(FIF.ACCEPT, '保留原有文件')
         self.deleteAction = Action(FIF.DELETE, '删除原有文件')
@@ -82,7 +83,6 @@ class MessageBoxBase(MaskDialogBase):
         self.buttonGroup = QFrame(self.widget)
         self.yesButton = PrimaryDropDownPushButton('确定', self.buttonGroup)
         self.yesButton.setMenu(self.menu)
-        #self.yesButton = PrimaryPushButton(self.tr('确定'), self.buttonGroup)
         self.cancelButton = QPushButton(self.tr('取消'), self.buttonGroup)
 
         self.vBoxLayout = QVBoxLayout(self.widget)
@@ -106,8 +106,8 @@ class MessageBoxBase(MaskDialogBase):
         self.yesButton.setFocus()
         self.buttonGroup.setFixedHeight(81)
 
-        self.passDeleteAction.triggered.connect(self.__onYesButtonClicked)
-        self.deleteAction.triggered.connect(self.__onYesButtonClicked)
+        self.passDeleteAction.triggered.connect(self.__onPassDeleteActionClicked)
+        self.deleteAction.triggered.connect(self.__onDeleteActionClicked)
         self.cancelButton.clicked.connect(self.__onCancelButtonClicked)
 
     def __initLayout(self):
@@ -133,8 +133,14 @@ class MessageBoxBase(MaskDialogBase):
     def __onCancelButtonClicked(self):
         self.reject()
 
-    def __onYesButtonClicked(self):
+    def __onPassDeleteActionClicked(self):
         if self.validate():
+            self.isDelete = False
+            self.accept()
+
+    def __onDeleteActionClicked(self):
+        if self.validate():
+            self.isDelete = True
             self.accept()
 
     def __setQss(self):
@@ -418,9 +424,9 @@ class OptionInterface(QWidget):
         self.exeBtn.setFixedWidth(145)
         self.exitBtn.setFixedWidth(145)
 
-        self.exeBtn.clicked.connect(self.onSyncAction)
-        self.syncAction.triggered.connect(self.onSyncAction)
-        self.lowSyncAction.triggered.connect(self.onLowSyncAction)
+        self.exeBtn.clicked.connect(lambda: self.onSyncAction("/speed=full", False, '1'))
+        self.syncAction.triggered.connect(lambda: self.onSyncAction("/speed=full", False, '1'))
+        self.lowSyncAction.triggered.connect(lambda: self.onSyncAction("/low_io", False, '2'))
         self.latelyCopyAction.triggered.connect(self.onLatelyCopyAction)
         self.dateCopyAction.triggered.connect(self.onDateCopyAction)
 
@@ -540,13 +546,12 @@ class OptionInterface(QWidget):
         else:
             self.slectAll.setCheckState(Qt.PartiallyChecked)
 
-    def onSyncAction(self):
+    def onSyncAction(self, commandOption, isDelete, mode):
         self.isClicked = True
 
         arg = ["ExpressMain.exe"]
-        # arg = ["D:\Express\.venv\Scripts\python.exe", "ExpressMain.py"]
-
         arg.append(drive)
+
         if self.yuwen.isChecked():
             arg.append("1")
         else:
@@ -591,23 +596,32 @@ class OptionInterface(QWidget):
             arg.append("1")
         else:
             arg.append("0")
+
+        arg.append(mode)
+        arg.append(str(isDelete))
+        arg.append(commandOption)
         subprocess.Popen(arg, shell=True)
         sys.exit()
-
-    def onLowSyncAction(self):
-        print("2")
 
     def onLatelyCopyAction(self):
         w = LatelyCopyMessageBox(self)
         if w.exec():
-            print(w.spinBox.value())
+            self.onSyncAction(f"/from_date=-{w.spinBox.value()}D", w.isDelete, '3')
             sys.exit()
 
     def onDateCopyAction(self):
         w = DateCopyMessageBox(self)
         if w.exec():
-            print(w.fromDate.date.toString())
-            print(w.toDate.date.toString())
+            if w.fromDate.date.toString('yyyyMMdd') == '':
+                w.fromDate.setDate(QDate.currentDate())
+            if w.toDate.date > QDate.currentDate():
+                w.toDate.setDate(QDate.currentDate())
+            if w.fromDate.date > QDate.currentDate():
+                w.toDate.setDate(QDate.currentDate())
+            if w.fromDate.date > w.toDate.date:
+                w.fromDate.setDate(w.toDate.date)
+
+            self.onSyncAction(f"/from_date={w.fromDate.date.toString('yyyyMMdd')} /to_date={w.toDate.date.toString('yyyyMMdd')}", w.isDelete, '4')
             sys.exit()
 
 
@@ -634,10 +648,13 @@ class AskInterface(QWidget):
         self.mainLayout.addLayout(self.btnLayout)
 
     def GetDriveName(self):
-        if GetVolumeInformation(drive)[0] != '':
-            return GetVolumeInformation(drive)[0]
-        else:
-            return "U盘"
+        try:
+            if GetVolumeInformation(drive)[0] != '':
+                return GetVolumeInformation(drive)[0]
+            else:
+                return "U盘"
+        except:
+            sys.exit()
 
 
 class ProfileCard(QWidget):
@@ -665,7 +682,7 @@ class MainWindow(MicaWindow):
         self.opacity = 0.98
         setThemeColor(QColor(113, 89, 249))
         self.setWindowTitle("Express")
-        self.setWindowIcon(QIcon(":/icon.png"))
+        self.setWindowIcon(QIcon(':/icon.png'))
         self.setWindowOpacity(self.opacity)
         self.setFixedSize(360, 145)
         self.desktop = QApplication.screens()[0].size()
@@ -713,10 +730,13 @@ class MainWindow(MicaWindow):
             sys.exit()
 
     def GetDriveName(self):
-        if GetVolumeInformation(drive)[0] != '':
-            return GetVolumeInformation(drive)[0]
-        else:
-            return "U盘"
+        try:
+            if GetVolumeInformation(drive)[0] != '':
+                return GetVolumeInformation(drive)[0]
+            else:
+                return "U盘"
+        except:
+            sys.exit()
 
     def GetDriveSize(self):
 
@@ -733,15 +753,12 @@ class MainWindow(MicaWindow):
     @Slot()
     def infoBtnOn(self):
         self.isClicked = True
-
         menu = RoundMenu(parent=self)
         card = ProfileCard(':/UsbIcon.png', self.GetDriveName() + ' (' + drive + ')', self.GetDriveSize(), menu)
         menu.addWidget(card, selectable=False)
         menu.addSeparator()
         SettingAction = Action(FIF.SETTING, '设置')
-
         SettingAction.triggered.connect(lambda: subprocess.Popen("ExpressSetting.exe", shell=True))
-
         menu.addAction(SettingAction)
         menu.addAction(Action(FIF.CLOSE, '关闭'))
         menu.exec(QPoint(self.x() + self.askInterface.infoBtn.x() - 315, self.y() + self.askInterface.infoBtn.y() - 55))

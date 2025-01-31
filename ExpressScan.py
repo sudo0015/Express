@@ -1,3 +1,5 @@
+import os
+import msvcrt
 import psutil
 import time
 import sys
@@ -12,6 +14,24 @@ mobile_letter = []
 mobile_number = 0
 
 
+class Mutex:
+    def __init__(self):
+        self.lockfile = None
+
+    def __enter__(self):
+        self.lockfile = open('ExpressScan.lockfile', 'w')
+        try:
+            msvcrt.locking(self.lockfile.fileno(), msvcrt.LK_NBLCK, 1)
+        except IOError:
+            sys.exit()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.lockfile:
+            msvcrt.locking(self.lockfile.fileno(), msvcrt.LK_UNLCK, 1)
+            self.lockfile.close()
+            os.remove('ExpressScan.lockfile')
+
+
 def update():
     global local_device, local_letter, local_number, mobile_device, mobile_letter, mobile_number
     tmp_local_device, tmp_local_letter = [], []
@@ -20,7 +40,7 @@ def update():
     try:
         part = psutil.disk_partitions()
     except:
-        sys.exit(-1)
+        sys.exit()
     else:
         for i in range(len(part)):
             tmplist = part[i].opts.split(",")
@@ -40,22 +60,22 @@ def update():
 
 
 if __name__ == "__main__":
-    cycle=cfg.ScanCycle.value/10
-    now_number = 0
-    before_number = update()
-    before_letter = local_letter + mobile_letter
-    while True:
-        now_number = update()
-        if (now_number > before_number and len(set(local_letter + mobile_letter).difference(set(before_letter))) == 1):
+    with Mutex():
+        cycle = cfg.ScanCycle.value / 10
+        now_number = 0
+        before_number = update()
+        before_letter = local_letter + mobile_letter
+        while True:
+            now_number = update()
+            if (now_number > before_number and len(set(local_letter + mobile_letter).difference(set(before_letter))) == 1):
 
-            args = ["ExpressUsbService.exe", ''.join(set(local_letter + mobile_letter).difference(set(before_letter)))]
-            #args = ["D:\Express\.venv\Scripts\python.exe", "ExpressUsbService.py", ''.join(set(local_letter + mobile_letter).difference(set(before_letter)))]
+                args = ["ExpressUsbService.exe", ''.join(set(local_letter + mobile_letter).difference(set(before_letter)))]
+                subprocess.Popen(args, shell=True)
 
-            subprocess.Popen(args, shell=True)
-            before_number = now_number
-            before_device = local_device + mobile_letter
-            before_letter = local_letter + mobile_letter
-        elif (now_number < before_number):
-            before_number = now_number
-            before_letter = local_letter + mobile_letter
-        time.sleep(cycle)
+                before_number = now_number
+                before_device = local_device + mobile_letter
+                before_letter = local_letter + mobile_letter
+            elif (now_number < before_number):
+                before_number = now_number
+                before_letter = local_letter + mobile_letter
+            time.sleep(cycle)

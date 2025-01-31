@@ -1,29 +1,93 @@
 import sys
 import os
-import subprocess
+import msvcrt
 import ExpressRes
+import subprocess
 from typing import Union
 from webbrowser import open as webopen
+from pygetwindow import getWindowsWithTitle as GetWindow
 from config import cfg, BufSize, VERSION, YEAR
-from PySide6.QtCore import Qt, Signal, QStandardPaths, QTimer, QThread
-from PySide6.QtGui import QColor, QIcon, QPainter, QTextCursor, QAction
+from PySide6.QtCore import Qt, Signal, QTimer, QThread, QRectF, QEasingCurve
+from PySide6.QtGui import QColor, QIcon, QPainter, QTextCursor, QAction, QPainterPath
 from PySide6.QtWidgets import QFrame, QApplication, QWidget, QHBoxLayout, QFileDialog, QLabel, QVBoxLayout, \
-    QPushButton, QButtonGroup, QTextBrowser, QTextEdit, QSizePolicy
+    QPushButton, QButtonGroup, QTextBrowser, QTextEdit, QSizePolicy, QLineEdit, QSpinBox, QScrollArea, QScroller
 from qfluentwidgets import MSFluentWindow, NavigationItemPosition, SubtitleLabel, MessageBox, ExpandLayout, \
     SettingCardGroup, PrimaryPushSettingCard, SmoothScrollArea, RadioButton, ExpandSettingCard, \
     ComboBox, SwitchButton, IndicatorPosition, qconfig, isDarkTheme, ConfigItem, OptionsConfigItem, \
     FluentStyleSheet, HyperlinkButton, Slider, IconWidget, drawIcon, setThemeColor, ImageLabel, MessageBoxBase, \
-    SmoothScrollDelegate, setFont
+    SmoothScrollDelegate, setFont, themeColor
 from qfluentwidgets.components.widgets.line_edit import EditLayer
 from qfluentwidgets.components.widgets.menu import MenuAnimationType, RoundMenu
+from qfluentwidgets.components.widgets.spin_box import SpinButton, SpinIcon
 from qfluentwidgets import FluentIcon as FIF
 
 
+class Mutex:
+    def __init__(self):
+        self.lockfile = None
+
+    def __enter__(self):
+        self.lockfile = open('ExpressSetting.lockfile', 'w')
+        try:
+            msvcrt.locking(self.lockfile.fileno(), msvcrt.LK_NBLCK, 1)
+        except IOError:
+            try:
+                window = GetWindow("Express 设置")[0]
+                if window.isMinimized:
+                    window.restore()
+                window.activate()
+            except:
+                pass
+            sys.exit()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.lockfile:
+            msvcrt.locking(self.lockfile.fileno(), msvcrt.LK_UNLCK, 1)
+            self.lockfile.close()
+            os.remove('ExpressSetting.lockfile')
+
+
+class SmoothScrollArea(QScrollArea):
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.delegate = SmoothScrollDelegate(self, True)
+        QScroller.grabGesture(self.viewport(), QScroller.TouchGesture)
+
+    def setScrollAnimation(self, orient, duration, easing=QEasingCurve.OutCubic):
+        """ set scroll animation
+
+        Parameters
+        ----------
+        orient: Orient
+            scroll orientation
+
+        duration: int
+            scroll duration
+
+        easing: QEasingCurve
+            animation type
+        """
+        bar = self.delegate.hScrollBar if orient == Qt.Horizontal else self.delegate.vScrollBar
+        bar.setScrollAnimation(duration, easing)
+
+    def enableTransparentBackground(self):
+        self.setStyleSheet("QScrollArea{border: none; background: transparent}")
+
+        if self.widget():
+            self.widget().setStyleSheet("QWidget{background: transparent}")
+
+
 class EditMenu(RoundMenu):
+    """ Edit menu """
+
     def createActions(self):
-        self.copyAct = QAction(FIF.COPY.icon(), self.tr("复制"), self, shortcut="Ctrl+C", triggered=self.parent().copy)
-        self.selectAllAct = QAction(FIF.CHECKBOX.icon(), self.tr("全选"), self, shortcut="Ctrl+A", triggered=self.parent().selectAll)
-        self.action_list = [self.copyAct, self.selectAllAct]
+        self.cutAct = QAction(FIF.CUT.icon(), self.tr("剪切"), self, shortcut="Ctrl+X", triggered=self.parent().cut,)
+        self.copyAct = QAction(FIF.COPY.icon(), self.tr("复制"), self, shortcut="Ctrl+C", triggered=self.parent().copy,)
+        self.pasteAct = QAction(FIF.PASTE.icon(), self.tr("粘贴"), self, shortcut="Ctrl+V", triggered=self.parent().paste,)
+        self.cancelAct = QAction(FIF.CANCEL.icon(), self.tr("撤销"), self, shortcut="Ctrl+Z", triggered=self.parent().undo,)
+        self.selectAllAct = QAction(self.tr("全选"), self, shortcut="Ctrl+A", triggered=self.parent().selectAll)
+        self.action_list = [self.cutAct, self.copyAct, self.pasteAct, self.cancelAct, self.selectAllAct]
 
     def _parentText(self):
         raise NotImplementedError
@@ -68,6 +132,115 @@ class EditMenu(RoundMenu):
                     self.addActions(self.action_list[3:])
 
         super().exec(pos, ani, aniType)
+
+
+class LineEditMenu(EditMenu):
+    """ Line edit menu """
+
+    def __init__(self, parent: QLineEdit):
+        super().__init__("", parent)
+        self.selectionStart = parent.selectionStart()
+        self.selectionLength = parent.selectionLength()
+
+    def _onItemClicked(self, item):
+        if self.selectionStart >= 0:
+            self.parent().setSelection(self.selectionStart, self.selectionLength)
+
+        super()._onItemClicked(item)
+
+    def _parentText(self):
+        return self.parent().text()
+
+    def _parentSelectedText(self):
+        return self.parent().selectedText()
+
+    def exec(self, pos, ani=True, aniType=MenuAnimationType.DROP_DOWN):
+        return super().exec(pos, ani, aniType)
+
+
+class SpinBoxBase:
+    """ Spin box ui """
+
+    def __init__(self, parent=None):
+        super().__init__(parent=parent)
+        self.hBoxLayout = QHBoxLayout(self)
+
+        self.setProperty('transparent', True)
+        FluentStyleSheet.SPIN_BOX.apply(self)
+        self.setButtonSymbols(QSpinBox.NoButtons)
+        self.setFixedHeight(33)
+        setFont(self)
+
+        self.setAttribute(Qt.WA_MacShowFocusRect, False)
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._showContextMenu)
+
+    def setReadOnly(self, isReadOnly: bool):
+        super().setReadOnly(isReadOnly)
+        self.setSymbolVisible(not isReadOnly)
+
+    def setSymbolVisible(self, isVisible: bool):
+        """ set whether the spin symbol is visible """
+        self.setProperty("symbolVisible", isVisible)
+        self.setStyle(QApplication.style())
+
+    def _showContextMenu(self, pos):
+        menu = LineEditMenu(self.lineEdit())
+        menu.exec_(self.mapToGlobal(pos))
+
+    def _drawBorderBottom(self):
+        if not self.hasFocus():
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHints(QPainter.Antialiasing)
+        painter.setPen(Qt.NoPen)
+
+        path = QPainterPath()
+        w, h = self.width(), self.height()
+        path.addRoundedRect(QRectF(0, h-10, w, 10), 5, 5)
+
+        rectPath = QPainterPath()
+        rectPath.addRect(0, h-10, w, 8)
+        path = path.subtracted(rectPath)
+
+        painter.fillPath(path, themeColor())
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        self._drawBorderBottom()
+
+
+class InlineSpinBoxBase(SpinBoxBase):
+    """ Inline spin box base """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.upButton = SpinButton(SpinIcon.UP, self)
+        self.downButton = SpinButton(SpinIcon.DOWN, self)
+
+        self.hBoxLayout.setContentsMargins(0, 4, 4, 4)
+        self.hBoxLayout.setSpacing(5)
+        self.hBoxLayout.addWidget(self.upButton, 0, Qt.AlignRight)
+        self.hBoxLayout.addWidget(self.downButton, 0, Qt.AlignRight)
+        self.hBoxLayout.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
+        self.upButton.clicked.connect(self.stepUp)
+        self.downButton.clicked.connect(self.stepDown)
+
+    def setSymbolVisible(self, isVisible: bool):
+        super().setSymbolVisible(isVisible)
+        self.upButton.setVisible(isVisible)
+        self.downButton.setVisible(isVisible)
+
+    def setAccelerated(self, on: bool):
+        super().setAccelerated(on)
+        self.upButton.setAutoRepeat(on)
+        self.downButton.setAutoRepeat(on)
+
+
+class SpinBox(InlineSpinBoxBase, QSpinBox):
+    """ Spin box """
 
 
 class TextEditMenu(EditMenu):
@@ -376,6 +549,53 @@ class HyperlinkCard(SettingCard):
         self.hBoxLayout.addSpacing(16)
 
 
+class SpinBoxSettingCard(SettingCard):
+    valueChanged = Signal(int)
+
+    def __init__(self, configItem: ConfigItem, icon: Union[str, QIcon, FIF], title, content=None, parent=None):
+        """
+        Parameters
+        ----------
+        configItem: ConfigItem
+            configuration item operated by the card
+
+        icon: str | QIcon | FluentIconBase
+            the icon to be drawn
+
+        title: str
+            the title of card
+
+        content: str
+            the content of card
+
+        parent: QWidget
+            parent widget
+        """
+        super().__init__(icon, title, content, parent)
+        self.configItem = configItem
+        self.spinBox = SpinBox(self)
+        self.spinBox.setFixedWidth(130)
+        self.spinBox.setAccelerated(True)
+        self.spinBox.setMaximum(5)
+        self.spinBox.setMinimum(1)
+        self.spinBox.setValue(configItem.value)
+
+        self.hBoxLayout.addStretch(1)
+        self.hBoxLayout.addWidget(self.spinBox, 0, Qt.AlignRight)
+        self.hBoxLayout.addSpacing(16)
+
+        configItem.valueChanged.connect(self.setValue)
+        self.spinBox.valueChanged.connect(self.__onValueChanged)
+
+    def __onValueChanged(self, value: int):
+        self.setValue(value)
+        self.valueChanged.emit(value)
+
+    def setValue(self, value):
+        qconfig.set(self.configItem, value)
+        self.spinBox.setValue(value)
+
+
 class ComboBoxSettingCard(SettingCard):
     def __init__(self, configItem: OptionsConfigItem, icon: Union[str, QIcon, FIF], title, content=None, texts=None, parent=None):
         """
@@ -513,11 +733,14 @@ class FolderItem(QWidget):
         self.hBoxLayout.addWidget(self.changeButton, 0, Qt.AlignRight)
         self.hBoxLayout.setAlignment(Qt.AlignVCenter)
 
+    def setFolder(self, text):
+        self.folderLabel.setText(text)
+
 
 class CustomFolderListSettingCard(ExpandSettingCard):
     folderChanged = Signal(list)
 
-    def __init__(self, title: str, content: str = None, directory="./", parent=None):
+    def __init__(self, title: str, content: str = None, directory=cfg.sourceFolder.value, parent=None):
         """
         Parameters
         ----------
@@ -580,15 +803,56 @@ class CustomFolderListSettingCard(ExpandSettingCard):
         self._adjustViewSize()
 
     def showFolderDialog(self, index):
-        """ show folder dialog """
         folder = QFileDialog.getExistingDirectory(self, self.tr("选择文件夹"), self._dialogDirectory)
         if not folder:
             return
 
-        # self.__addFolderItem(folder)
-        # self.folders.append(folder)
-        # qconfig.set(self.configItem, self.folders)
-        # self.folderChanged.emit(self.folders)
+        if index==1:
+            cfg.set(cfg.yuwenFolder, folder)
+            self.yuwenItem.setFolder("语文: " + cfg.yuwenFolder.value)
+        elif index==2:
+            cfg.set(cfg.shuxueFolder, folder)
+            self.shuxueItem.setFolder("数学: " + cfg.shuxueFolder.value)
+        elif index==3:
+            cfg.set(cfg.yingyuFolder, folder)
+            self.yingyuItem.setFolder("英语: " + cfg.yingyuFolder.value)
+        elif index==4:
+            cfg.set(cfg.wuliFolder, folder)
+            self.wuliItem.setFolder("物理: " + cfg.wuliFolder.value)
+        elif index==5:
+            cfg.set(cfg.huaxueFolder, folder)
+            self.huaxueItem.setFolder("化学: " + cfg.huaxueFolder.value)
+        elif index==6:
+            cfg.set(cfg.shengwuFolder, folder)
+            self.shengwuItem.setFolder("生物: " + cfg.shengwuFolder.value)
+        elif index==7:
+            cfg.set(cfg.zhengzhiFolder, folder)
+            self.zhengzhiItem.setFolder("政治: " + cfg.zhengzhiFolder.value)
+        elif index==8:
+            cfg.set(cfg.lishiFolder, folder)
+            self.lishiItem.setFolder("历史: " + cfg.lishiFolder.value)
+        elif index==9:
+            cfg.set(cfg.lishiFolder, folder)
+            self.diliItem.setFolder("地理: " + cfg.diliFolder.value)
+        elif index==10:
+            cfg.set(cfg.jishuFolder, folder)
+            self.jishuItem.setFolder("技术: " + cfg.jishuFolder.value)
+        else:
+            cfg.set(cfg.ziliaoFolder, folder)
+            self.ziliaoItem.setFolder("资料: " + cfg.zilaioFolder.value)
+
+    def updateContent(self):
+        self.yuwenItem.setFolder("语文: " + cfg.yuwenFolder.value)
+        self.shuxueItem.setFolder("数学: " + cfg.shuxueFolder.value)
+        self.yingyuItem.setFolder("英语: " + cfg.yingyuFolder.value)
+        self.wuliItem.setFolder("物理: " + cfg.wuliFolder.value)
+        self.huaxueItem.setFolder("化学: " + cfg.huaxueFolder.value)
+        self.shengwuItem.setFolder("生物: " + cfg.shengwuFolder.value)
+        self.zhengzhiItem.setFolder("政治: " + cfg.zhengzhiFolder.value)
+        self.lishiItem.setFolder("历史: " + cfg.lishiFolder.value)
+        self.diliItem.setFolder("地理: " + cfg.diliFolder.value)
+        self.jishuItem.setFolder("技术: " + cfg.jishuFolder.value)
+        self.ziliaoItem.setFolder("资料: " + cfg.ziliaoFolder.value)
 
 
 class ClearCache(QThread):
@@ -645,12 +909,17 @@ class HomeInterface(SmoothScrollArea):
         self.customFolderCard = CustomFolderListSettingCard(
             self.tr("自定义"),
             self.tr("展开选项卡以设置"),
-            directory=QStandardPaths.writableLocation(QStandardPaths.DownloadLocation),
+            directory=cfg.sourceFolder.value,
             parent=self.sourceGroup)
         self.scanCycleCard = RangeSettingCard(
             cfg.ScanCycle,
             FIF.STOP_WATCH,
             self.tr('扫描周期'),
+            parent=self.performanceGroup)
+        self.concurrentProcessCard = SpinBoxSettingCard(
+            cfg.ConcurrentProcess,
+            FIF.ALIGNMENT,
+            self.tr('并行进程数'),
             parent=self.performanceGroup)
         self.bufSizeCard = OptionsSettingCard(
             cfg.BufSize,
@@ -704,6 +973,7 @@ class HomeInterface(SmoothScrollArea):
         self.actGroup.addSettingCard(self.autoRunCard)
         self.actGroup.addSettingCard(self.notifyCard)
         self.performanceGroup.addSettingCard(self.scanCycleCard)
+        self.performanceGroup.addSettingCard(self.concurrentProcessCard)
         self.performanceGroup.addSettingCard(self.bufSizeCard)
         self.storageGroup.addSettingCard(self.clearCard)
         self.advanceGroup.addSettingCard(self.recoverCard)
@@ -716,6 +986,16 @@ class HomeInterface(SmoothScrollArea):
         self.expandLayout.addWidget(self.performanceGroup)
         self.expandLayout.addWidget(self.storageGroup)
         self.expandLayout.addWidget(self.advanceGroup)
+
+    def noSourceFolderDialog(self):
+        w = MessageBox(
+            '警告',
+            '未设置班级文件夹',
+            self)
+        w.yesButton.setText('设置')
+        w.cancelButton.hide()
+        if w.exec():
+            self.__onCloudCardClicked()
 
     def getSize(self):
         try:
@@ -730,9 +1010,9 @@ class HomeInterface(SmoothScrollArea):
                     pass
         kbSize = float(size / 1024)
         if kbSize >= 1024*1024:
-            return str(kbSize/1024/1024) + ' GB'
+            return str(round(kbSize/1024/1024, 1)) + ' GB'
         elif kbSize >= 1024:
-            return str(kbSize/1024) + ' MB'
+            return str(round(kbSize/1024, 1)) + ' MB'
         else:
             return str(int(kbSize)) + ' KB'
 
@@ -740,6 +1020,19 @@ class HomeInterface(SmoothScrollArea):
         if self.optionSourceCard.comboBox.text() == "云上春晖":
             self.cloudCard.setDisabled(False)
             self.customFolderCard.setDisabled(True)
+
+            folder = cfg.sourceFolder.value
+            cfg.set(cfg.yuwenFolder, os.path.join(folder, '语文'))
+            cfg.set(cfg.shuxueFolder, os.path.join(folder, '数学'))
+            cfg.set(cfg.yingyuFolder, os.path.join(folder, '英语'))
+            cfg.set(cfg.wuliFolder, os.path.join(folder, '物理'))
+            cfg.set(cfg.huaxueFolder, os.path.join(folder, '化学'))
+            cfg.set(cfg.shengwuFolder, os.path.join(folder, '生物'))
+            cfg.set(cfg.zhengzhiFolder, os.path.join(folder, '政治'))
+            cfg.set(cfg.lishiFolder, os.path.join(folder, '历史'))
+            cfg.set(cfg.diliFolder, os.path.join(folder, '地理'))
+            cfg.set(cfg.jishuFolder, os.path.join(folder, '技术'))
+            cfg.set(cfg.ziliaoFolder, os.path.join(folder, '资料'))
         else:
             self.cloudCard.setDisabled(True)
             self.customFolderCard.setDisabled(False)
@@ -748,8 +1041,21 @@ class HomeInterface(SmoothScrollArea):
         folder = QFileDialog.getExistingDirectory(self, self.tr("选择文件夹"), "./")
         if not folder or cfg.get(cfg.sourceFolder) == folder:
             return
-        cfg.set(cfg.sourceFolder, folder)
+
         self.cloudCard.setContent(folder)
+        cfg.set(cfg.sourceFolder, folder)
+        cfg.set(cfg.yuwenFolder, os.path.join(folder, '语文'))
+        cfg.set(cfg.shuxueFolder, os.path.join(folder, '数学'))
+        cfg.set(cfg.yingyuFolder, os.path.join(folder, '英语'))
+        cfg.set(cfg.wuliFolder, os.path.join(folder, '物理'))
+        cfg.set(cfg.huaxueFolder, os.path.join(folder, '化学'))
+        cfg.set(cfg.shengwuFolder, os.path.join(folder, '生物'))
+        cfg.set(cfg.zhengzhiFolder, os.path.join(folder, '政治'))
+        cfg.set(cfg.lishiFolder, os.path.join(folder, '历史'))
+        cfg.set(cfg.diliFolder, os.path.join(folder, '地理'))
+        cfg.set(cfg.jishuFolder, os.path.join(folder, '技术'))
+        cfg.set(cfg.ziliaoFolder, os.path.join(folder, '资料'))
+        self.customFolderCard.updateContent()
 
     def clearFinished(self):
         self.clearCacheThread.exit(0)
@@ -783,6 +1089,7 @@ class HomeInterface(SmoothScrollArea):
             self.autoRunCard.setChecked(True)
             self.notifyCard.setChecked(True)
             self.scanCycleCard.setValue(10)
+            self.concurrentProcessCard.setValue(3)
             self.bufSizeCard.setValue(BufSize._256)
 
     def openConfig(self):
@@ -810,25 +1117,37 @@ class DetailMessageBox(MessageBoxBase):
         self.textBox = TextBrowser(self)
         self.textBox.setText(
             f'Express\n版本 {VERSION}\nCopyright © {YEAR} BUG STUDIO\n\n' +
-            'FastCopy\n版本 5.7.15\nCopyright © 2004-2024 H.Shirouzu and FastCopy Lab, LLC.\n\n' +
             'MIT License\nPermission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:\n' +
             'The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.\n' +
             'THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.\n'
         )
 
+        self.githubBtn = HyperlinkButton(self)
+        self.websiteBtn = HyperlinkButton(self)
+        self.onlineDocBtn = HyperlinkButton(self)
+        self.githubBtn.setText('源代码')
+        self.websiteBtn.setText('网站主页')
+        self.onlineDocBtn.setText('在线文档')
+        self.githubBtn.setIcon(FIF.GITHUB)
+        self.websiteBtn.setIcon(FIF.GLOBE)
+        self.onlineDocBtn.setIcon(FIF.DOCUMENT)
+        self.githubBtn.clicked.connect(lambda: webopen("https://github.com/sudo0015/Express"))
+        self.websiteBtn.clicked.connect(lambda: webopen("https://sudo0015.github.io/"))
+        self.onlineDocBtn.clicked.connect(lambda: webopen("https://github.com/sudo0015/Express"))
+
+        self.btnLayout = QHBoxLayout(self)
+        self.btnLayout.addWidget(self.githubBtn)
+        self.btnLayout.addWidget(self.websiteBtn)
+        self.btnLayout.addWidget(self.onlineDocBtn)
+
         self.viewLayout.addWidget(self.titleLabel)
         self.viewLayout.addWidget(self.textBox)
+        self.viewLayout.addLayout(self.btnLayout)
 
-        self.yesButton.setText('源代码')
-        self.yesButton.setIcon(FIF.GITHUB)
-        self.cancelButton.setText('确定')
+        self.yesButton.setText('确定')
+        self.hideCancelButton()
 
         self.widget.setMinimumWidth(350)
-
-        self.yesButton.clicked.connect(self.onYesButton)
-
-    def onYesButton(self):
-        webopen("https://github.com/sudo0015/Express")
 
 
 class AboutInterface(SmoothScrollArea):
@@ -956,8 +1275,9 @@ class Main(MSFluentWindow):
 
 
 if __name__ == '__main__':
-    QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
-    app = QApplication(sys.argv)
-    w = Main()
-    w.show()
-    app.exec()
+    with Mutex():
+        QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+        app = QApplication(sys.argv)
+        w = Main()
+        w.show()
+        app.exec()

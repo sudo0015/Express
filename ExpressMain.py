@@ -9,11 +9,12 @@ from winotify import Notification, audio
 from win32api import GetVolumeInformation
 from PySide6.QtGui import QIcon, QColor
 from PySide6.QtCore import Qt, QThread, Signal, QEvent
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout, QLabel, QWidget
+from PySide6.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout, QLabel, QWidget, QGridLayout, QFrame, QPushButton
 from qfluentwidgets import setTheme, Theme, BodyLabel, isDarkTheme, PushButton, SubtitleLabel, ProgressBar, \
-    InfoBar, InfoBarIcon, InfoBarPosition, IndeterminateProgressBar, setThemeColor
+    InfoBar, InfoBarIcon, InfoBarPosition, IndeterminateProgressBar, setThemeColor, PrimaryPushButton, TextWrap
 from qframelesswindow.titlebar import MinimizeButton, CloseButton, MaximizeButton
 from qframelesswindow.utils import startSystemMove
+from qframelesswindow import FramelessDialog
 from qfluentwidgets.common.style_sheet import FluentStyleSheet
 from qfluentwidgets import FluentIcon as FIF
 
@@ -27,7 +28,7 @@ if isWin11():
 else:
     from qframelesswindow import FramelessWindow as Window
 
-DLL_PATH = "./_internal/taskbar-progress.dll"
+DLL_PATH = "./taskbar-progress.dll"
 
 TBPF_NOPROGRESS = 0x0
 TBPF_INDETERMINATE = 0x1
@@ -194,10 +195,13 @@ class FluentTitleBar(TitleBar):
         FluentStyleSheet.FLUENT_WINDOW.apply(self)
 
     def GetDriveName(self):
-        if GetVolumeInformation(drive)[0] != '':
-            return GetVolumeInformation(drive)[0]
-        else:
-            return "U盘"
+        try:
+            if GetVolumeInformation(drive)[0] != '':
+                return GetVolumeInformation(drive)[0]
+            else:
+                return "U盘"
+        except:
+            sys.exit()
 
 
 class MicaWindow(Window):
@@ -207,6 +211,131 @@ class MicaWindow(Window):
         self.setTitleBar(FluentTitleBar(self))
         if isWin11():
             self.windowEffect.setMicaEffect(self.winId(), isDarkTheme())
+
+
+class Ui_MessageBox:
+    """ Ui of message box """
+
+    yesSignal = Signal()
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def _setUpUi(self, title, content, parent):
+        self.content = content
+        self.titleLabel = QLabel(title, parent)
+        self.contentLabel = BodyLabel(content, parent)
+
+        self.buttonGroup = QFrame(parent)
+        self.yesButton = PrimaryPushButton(self.tr('确定'), self.buttonGroup)
+
+        self.vBoxLayout = QVBoxLayout(parent)
+        self.textLayout = QVBoxLayout()
+        self.buttonLayout = QHBoxLayout(self.buttonGroup)
+
+        self.__initWidget()
+
+    def __initWidget(self):
+        self.__setQss()
+        self.__initLayout()
+
+        self.yesButton.setAttribute(Qt.WA_LayoutUsesWidgetRect)
+        self.yesButton.setFixedWidth(150)
+        self.yesButton.setFocus()
+        self.buttonGroup.setFixedHeight(81)
+
+        self.contentLabel.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._adjustText()
+
+        self.yesButton.clicked.connect(self.__onYesButtonClicked)
+
+    def _adjustText(self):
+        if self.isWindow():
+            if self.parent():
+                w = max(self.titleLabel.width(), self.parent().width())
+                chars = max(min(w / 9, 140), 30)
+            else:
+                chars = 100
+        else:
+            w = max(self.titleLabel.width(), self.window().width())
+            chars = max(min(w / 9, 100), 30)
+
+        self.contentLabel.setText(TextWrap.wrap(self.content, chars, False)[0])
+
+    def __initLayout(self):
+        self.vBoxLayout.setSpacing(0)
+        self.vBoxLayout.setContentsMargins(0, 0, 0, 0)
+        self.vBoxLayout.addLayout(self.textLayout, 1)
+        self.vBoxLayout.addWidget(self.buttonGroup, 0, Qt.AlignBottom)
+        self.vBoxLayout.setSizeConstraint(QVBoxLayout.SetMinimumSize)
+
+        self.textLayout.setSpacing(12)
+        self.textLayout.setContentsMargins(24, 24, 24, 24)
+        self.textLayout.addWidget(self.titleLabel, 0, Qt.AlignTop)
+        self.textLayout.addWidget(self.contentLabel, 0, Qt.AlignTop)
+
+        self.buttonLayout.setContentsMargins(24, 24, 24, 24)
+        self.buttonLayout.addWidget(self.yesButton, 1, Qt.AlignRight)
+
+    def __onYesButtonClicked(self):
+        self.accept()
+        self.yesSignal.emit()
+
+    def __setQss(self):
+        self.titleLabel.setObjectName("titleLabel")
+        self.contentLabel.setObjectName("contentLabel")
+        self.buttonGroup.setObjectName('buttonGroup')
+
+        FluentStyleSheet.DIALOG.apply(self)
+        FluentStyleSheet.DIALOG.apply(self.contentLabel)
+
+        self.yesButton.adjustSize()
+
+    def setContentCopyable(self, isCopyable: bool):
+        """ set whether the content is copyable """
+        if isCopyable:
+            self.contentLabel.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextSelectableByMouse)
+        else:
+            self.contentLabel.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+
+
+class Dialog(FramelessDialog, Ui_MessageBox):
+    """ Dialog box """
+
+    yesSignal = Signal()
+    cancelSignal = Signal()
+
+    def __init__(self, title: str, content: str, parent=None):
+        super().__init__(parent=parent)
+        self._setUpUi(title, content, self)
+
+        self.windowTitleLabel = QLabel(title, self)
+
+        self.setResizeEnabled(False)
+        self.resize(240, 192)
+        self.titleBar.hide()
+
+        self.vBoxLayout.insertWidget(0, self.windowTitleLabel, 0, Qt.AlignTop)
+        self.windowTitleLabel.setObjectName('windowTitleLabel')
+        FluentStyleSheet.DIALOG.apply(self)
+        self.setFixedSize(self.size())
+
+    def setTitleBarVisible(self, isVisible: bool):
+        self.windowTitleLabel.setVisible(isVisible)
+
+
+class DeleteThread(QThread):
+    deleteFinished = Signal(bool)
+
+    def __init__(self, parent=None):
+        super().__init__(parent=parent)
+
+    def run(self):
+        args = "fcp.exe /cmd=delete " + f"/bufsize={buf} /log=FALSE " + f'/force_start={concurrentProcess} "{destFolder}"'
+        subprocess.call(args, shell=True)
+        self.deleteFinished.emit(True)
+        return
 
 
 class SyncThread(QThread):
@@ -259,29 +388,30 @@ class SyncThread(QThread):
         while True:
             if taskList:
                 if taskList[0] == 1:
-                    currentFolder = folder + "/语文"
+                    currentFolder = cfg.yuwenFolder.value
                 elif taskList[0] == 2:
-                    currentFolder = folder + "/数学"
+                    currentFolder = cfg.shuxueFolder.value
                 elif taskList[0] == 3:
-                    currentFolder = folder + "/英语"
+                    currentFolder = cfg.yingyuFolder.value
                 elif taskList[0] == 4:
-                    currentFolder = folder + "/物理"
+                    currentFolder = cfg.wuliFolder.value
                 elif taskList[0] == 5:
-                    currentFolder = folder + "/化学"
+                    currentFolder = cfg.huaxueFolder.value
                 elif taskList[0] == 6:
-                    currentFolder = folder + "/生物"
+                    currentFolder = cfg.shengwuFolder.value
                 elif taskList[0] == 7:
-                    currentFolder = folder + "/政治"
+                    currentFolder = cfg.zhengzhiFolder.value
                 elif taskList[0] == 8:
-                    currentFolder = folder + "/历史"
+                    currentFolder = cfg.lishiFolder.value
                 elif taskList[0] == 9:
-                    currentFolder = folder + "/地理"
+                    currentFolder = cfg.diliFolder.value
                 elif taskList[0] == 10:
-                    currentFolder = folder + "/技术"
+                    currentFolder = cfg.jishuFolder.value
                 elif taskList[0] == 11:
-                    currentFolder = folder + "/资料"
+                    currentFolder = cfg.ziliaoFolder.value
+
                 taskList.pop(0)
-                args = "fcp.exe /cmd=sync " + f"/bufsize={buf} " + '/log=FALSE "' + currentFolder.replace('/', '\\') + f'" /to="{destFolder}"'
+                args = "fcp.exe /cmd=sync " + f"/bufsize={buf} /log=FALSE " + f'/force_start={concurrentProcess} {commandOption} "' + currentFolder + f'" /to="{destFolder}"'
                 subprocess.call(args, shell=True)
                 self.progress_value = int((taskNum - len(taskList)) / taskNum * 100)
                 self.valueChange.emit(self.progress_value)
@@ -296,32 +426,42 @@ class MainWindow(MicaWindow):
     def __init__(self):
         super().__init__()
         setThemeColor(QColor(113, 89, 249))
-        self.setWindowIcon(QIcon(":/icon.png"))
         self.resize(500, 130)
-        self.setFixedHeight(130)
+        self.setWindowTitle('Express - ' + self.GetDriveName() + ' (' + drive + ')')
+        self.setWindowIcon(QIcon(':/icon.png'))
+        self.setFixedHeight(150)
         self.setWindowOpacity(0.98)
+        self.displayText = {1:"同步 (默认)", 2:"同步 (低占用)", 3:"复制 (最近文件)", 4:"复制 (从时间戳)"}[mode]
+        if mode == 3 or mode == 4:
+            self.displayText += ' - '
+            self.displayText += "删除原有文件" if isDelete else "保留原有文件"
+        self.subject = ""
+        for i in taskList:
+            self.subject += {1: '语文', 2: '数学', 3: '英语', 4: '物理', 5: '化学', 6: '生物', 7: '政治', 8: '历史', 9: '地理', 10: '技术', 11: '资料'}[i] + '; '
 
-        self.thread_running = False
-        self.setup_thread()
-        self.start_thread()
-
-        self.titleBar.closeBtn.clicked.connect(self.cancelBtnOn)
+        self.titleBar.closeBtn.clicked.connect(self.onCancelBtn)
 
         self.mainLayout = QVBoxLayout(self)
-        self.topLayout = QHBoxLayout(self)
+        self.topLayout = QGridLayout(self)
         self.bottomLayout = QHBoxLayout(self)
         self.mainLayout.setContentsMargins(0, 0, 0, 0)
-        self.topLayout.setContentsMargins(20, 0, 20, 5)
+        self.topLayout.setContentsMargins(20, 0, 20, 0)
         self.bottomLayout.setContentsMargins(20, 5, 20, 20)
 
         self.statusLabel = SubtitleLabel(self)
-        self.statusLabel.setText("准备中")
+        self.detailLabel = BodyLabel(self)
+        self.detailLabel.setText(self.displayText)
+        self.detailLabel.setTextColor(QColor(114, 114, 114))
         self.isPrepare = True
-        self.cancelBtn = PushButton(FIF.CLOSE, '取消同步', self)
-        self.cancelBtn.clicked.connect(self.cancelBtnOn)
-        self.topLayout.addWidget(self.statusLabel)
-        self.topLayout.addStretch(1)
-        self.topLayout.addWidget(self.cancelBtn)
+        self.showDetailBtn = PushButton(FIF.CHECKBOX, '选项', self)
+        self.cancelBtn = PushButton(FIF.CLOSE, '取消', self)
+        self.showDetailBtn.clicked.connect(self.onShowDetailBtn)
+        self.cancelBtn.clicked.connect(self.onCancelBtn)
+        self.topLayout.addWidget(self.statusLabel, 0, 0)
+        self.topLayout.addWidget(self.detailLabel, 1, 0)
+        self.topLayout.setColumnStretch(0, 1)
+        self.topLayout.addWidget(self.showDetailBtn, 0, 1, 2, 1)
+        self.topLayout.addWidget(self.cancelBtn, 0, 2, 2, 1)
 
         self.inProgressBar = IndeterminateProgressBar(self)
         self.progressBar = ProgressBar(self)
@@ -342,22 +482,59 @@ class MainWindow(MicaWindow):
         self.mainLayout.addLayout(self.topLayout)
         self.mainLayout.addLayout(self.bottomLayout)
 
-    def setup_thread(self):
-        self.thread = SyncThread()
-        self.thread.valueChange.connect(self.set_value)
-        self.thread_running = True
+        self.deleteThread = DeleteThread()
+        self.syncThread = SyncThread()
+        self.syncThreadRunning = False
+        self.deleteThreadRunning = False
+        if isDelete:
+            self.statusLabel.setText("正在删除原有文件")
+            self.setupDeleteThread()
+            self.startDeleteThread()
+        else:
+            self.statusLabel.setText("准备中")
+            self.setupSyncThread()
+            self.startSyncThread()
 
-    def set_value(self):
-        if self.thread.progress_value == -1:
-            self.thread.quit()
-            self.thread_running = False
+    def setupDeleteThread(self):
+        self.deleteThread.deleteFinished.connect(self.deleteThreadFinished)
+        self.deleteThreadRunning = True
+
+    def startDeleteThread(self):
+        if self.deleteThreadRunning:
+            self.deleteThread.start()
+        else:
+            self.setupDeleteThread()
+            self.deleteThread.start()
+
+    def deleteThreadFinished(self):
+        self.deleteThread.quit()
+        self.deleteThreadRunning = False
+        self.setupSyncThread()
+        self.startSyncThread()
+        self.statusLabel.setText("准备中")
+
+    def setupSyncThread(self):
+        self.syncThread.valueChange.connect(self.setSyncValue)
+        self.syncThreadRunning = True
+
+    def startSyncThread(self):
+        if self.syncThreadRunning:
+            self.syncThread.start()
+        else:
+            self.setupSyncThread()
+            self.syncThread.start()
+
+    def setSyncValue(self):
+        if self.syncThread.progress_value == -1:
+            self.syncThread.quit()
+            self.syncThreadRunning = False
             self.taskbarProgress.set_mode(0)
             if cfg.Notify.value:
                 toast = Notification(app_id="Express", title="同步完成", msg=self.GetDriveName() + ' (' + drive + ')', duration="short")
                 toast.set_audio(audio.Default, loop=False)
                 toast.show()
             sys.exit()
-        # elif self.thread.progress_value == -2:
+        # elif self.syncThread.progress_value == -2:
         #     self.statusLabel.setText("即将完成")
         #     self.bottomLayout.removeWidget(self.progressBar)
         #     self.inProgressBar.setVisible(True)
@@ -377,43 +554,50 @@ class MainWindow(MicaWindow):
                 self.taskbarProgress.set_mode(2)
                 self.taskbarProgress.init()
 
-            self.taskbarProgress.set_progress(self.thread.progress_value, 100)
-            self.progressBar.setValue(self.thread.progress_value)
-            self.progressLabel.setText(str(self.thread.progress_value) + '%')
+            self.taskbarProgress.set_progress(self.syncThread.progress_value, 100)
+            self.progressBar.setValue(self.syncThread.progress_value)
+            self.progressLabel.setText(str(self.syncThread.progress_value) + '%')
             self.bottomLayout.addWidget(self.progressBar)
             self.bottomLayout.addWidget(self.spaceLabel)
             self.bottomLayout.addWidget(self.progressLabel)
 
-    def start_thread(self):
-        if self.thread_running:
-            self.thread.start()
-        if not self.thread_running:
-            self.setup_thread()
-            self.thread.start()
-
-    def stop(self):
+    def stopThread(self):
         self.progressBar.pause()
         self.inProgressBar.pause()
         self.taskbarProgress.set_mode(4)
 
-        self.thread.quit()
-        self.thread_running = False
+        self.deleteThread.quit()
+        self.deleteThreadRunning = False
+        self.syncThread.quit()
+        self.syncThreadRunning = False
         subprocess.call(["taskkill", "-f", "-im", "fcp.exe"], shell=True)
         sys.exit()
 
     def GetDriveName(self):
-        if GetVolumeInformation(drive)[0] != '':
-            return GetVolumeInformation(drive)[0]
-        else:
-            return "U盘"
+        try:
+            if GetVolumeInformation(drive)[0] != '':
+                return GetVolumeInformation(drive)[0]
+            else:
+                return "U盘"
+        except:
+            sys.exit()
 
-    def cancelBtnOn(self):
+    def onCancelBtn(self):
         yesBtn = PushButton('确定')
-        yesBtn.clicked.connect(self.stop)
+        yesBtn.clicked.connect(self.stopThread)
         w = InfoBar(icon=InfoBarIcon.WARNING, title='取消同步？', content='', orient=Qt.Horizontal, isClosable=True,
                     position=InfoBarPosition.BOTTOM, duration=-1, parent=self)
         w.addWidget(yesBtn)
         w.show()
+
+    def onShowDetailBtn(self):
+        title = 'Express 选项'
+        content = f"目标驱动器: {drive}\\\n模式: {self.displayText}\n学科: {self.subject}\n命令行选项: {commandOption}\n缓冲区大小: {buf} MB\n并行进程数: {concurrentProcess}"
+        w = Dialog(title, content, self)
+        w.setTitleBarVisible(False)
+        w.setContentCopyable(True)
+        if w.exec():
+            pass
 
 
 if __name__ == '__main__':
@@ -421,6 +605,16 @@ if __name__ == '__main__':
     if darkdetect.isDark():
         setTheme(Theme.DARK)
     app = QApplication(sys.argv)
+
+    """
+    args
+    1           drive
+    2 - 12      subject
+    13          mode{1:"sync(default)", 2:"sync(low)", 3:"copy(lately)", 4:"copy(from_date)"}
+    14          isDelete
+    15          commandOption
+    """
+
     drive = sys.argv[1]
     taskList = []
     for i in range(2, 13):
@@ -428,9 +622,13 @@ if __name__ == '__main__':
             taskList.append(i - 1)
     taskNum = len(taskList)
     buf = str(cfg.BufSize.value)[9:]
-    folder = cfg.sourceFolder.value
-    sourceFolder = folder.replace('/', '\\')
-    destFolder = drive + '\\' + os.path.basename(folder) + '\\'
+    concurrentProcess = cfg.ConcurrentProcess.value
+    sourceFolder = os.path.normpath(cfg.sourceFolder.value)
+    destFolder = drive + '\\' + os.path.basename(sourceFolder) + '\\'
+    mode = int(sys.argv[13])
+    isDelete = False if sys.argv[14] == 'False' else True
+    commandOption = sys.argv[15]
+
     w = MainWindow()
     w.show()
     app.exec()
